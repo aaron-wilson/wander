@@ -25,12 +25,12 @@ flowchart LR
 Each repository installs, tests and deploys on its own. The hub pins compatible revisions and
 owns everything the three applications share.
 
-| Layer   | Owns                                                                           | Main trade-off                                              |
-| ------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------- |
-| UI      | Interaction, generated urql operations, PKCE sign-in, MDX guides, local images | Public configuration is fixed at build time                 |
-| GraphQL | Client-shaped reads, DataLoader, provider orchestration, generation lifecycle  | Process-local jobs need one task; a restart interrupts work |
-| REST    | Domain rules, ownership, conditional writes, share projections, OpenAPI        | The extra HTTP hop keeps persistence separate from planning |
-| Hub     | Compose, shared CDK foundation, release tooling                                | Four independent repositories need compatible revisions     |
+| Layer   | Owns                                                                                | Main trade-off                                              |
+| ------- | ----------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| UI      | Interaction, generated urql operations, PKCE sign-in, planning guides, local images | Public configuration is fixed at build time                 |
+| GraphQL | Client-shaped reads, DataLoader, provider orchestration, generation lifecycle       | Process-local jobs need one task; a restart interrupts work |
+| REST    | Domain rules, ownership, conditional writes, share projections, OpenAPI             | The extra HTTP hop keeps persistence separate from planning |
+| Hub     | Compose, shared CDK foundation, release tooling                                     | Four independent repositories need compatible revisions     |
 
 ## Runtime
 
@@ -191,7 +191,6 @@ reachable, and the UI stack owns the bucket's only access policy.
 ```mermaid
 flowchart LR
   schema[schema.graphql snapshot] --> codegen[Typed operations]
-  mdx[content/*.mdx] --> next
   art[artwork SVG] --> sharp[Sharp AVIF/WebP, committed]
   codegen & sharp --> next[Next static export]
   next --> maps["Optional Sentry<br/>source-map upload, then removal"]
@@ -200,7 +199,7 @@ flowchart LR
   images[API images tagged by SHA] --> ecr[ECR] --> ecs[ECS rollout]
 ```
 
-Next builds the static app, Vite only transforms tests, and MDX and Sharp run at build time.
+Next builds the static app, Vite only transforms tests, and Sharp runs at build time.
 There is no Next server running at request time and no direct path from the UI to REST.
 Rollback republishes an archived export without rebuilding it. Hashed assets are kept between
 releases, but a release is not atomic across pages.

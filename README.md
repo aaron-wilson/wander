@@ -28,7 +28,7 @@ This hub contains the [architecture](docs/architecture.md), Docker Compose setup
 - Typed API boundaries, runtime validation, and interchangeable planning/storage providers
 - Unit, integration, browser, and infrastructure tests
 - Containers, AWS infrastructure, and disabled CI/CD templates
-- Optional API telemetry, browser monitoring, MDX, and build-time images
+- Optional API telemetry, browser monitoring, and build-time images
 
 ---
 
@@ -38,7 +38,7 @@ This hub contains the [architecture](docs/architecture.md), Docker Compose setup
 | ------------------------------------------------------ | ---------------------- | ------------------------------------------------------ |
 | [graph-api](https://github.com/aaron-wilson/graph-api) | GraphQL orchestration  | Yoga, DataLoader, provider adapters, authenticated SSE |
 | [rest-api](https://github.com/aaron-wilson/rest-api)   | Domain and persistence | Hono, Zod, OpenAPI, memory/DynamoDB stores             |
-| [react-ui](https://github.com/aaron-wilson/react-ui)   | Static frontend        | Next.js, React, urql, Tailwind, MDX, Sharp             |
+| [react-ui](https://github.com/aaron-wilson/react-ui)   | Static frontend        | Next.js, React, urql, Tailwind, Sharp                  |
 
 ---
 
@@ -56,7 +56,7 @@ Versions reflect the committed dependency set; Node 24 is the container/workflow
 | Testing             | Vitest 5 · Supertest                  | Vitest 5 · Supertest                | Vitest 5 · Playwright 1.63 · axe  |
 | Deployment          | Docker · ECS Fargate · ALB            | Docker · ECS Fargate · internal ALB | Private S3 · CloudFront OAC       |
 | Observability       | OpenTelemetry → optional New Relic    | OpenTelemetry → optional New Relic  | Optional Sentry 11.1              |
-| Presentation        | —                                     | Swagger UI                          | Tailwind 4.3 · MDX 3 · Sharp 0.34 |
+| Presentation        | —                                     | Swagger UI                          | Tailwind 4.3 · Sharp 0.34         |
 
 Shared infrastructure uses AWS CDK 2.271.0 (library), IAM, SSM and Secrets Manager. GitHub Actions definitions are disabled templates. Vite transforms UI tests; Next builds the application. Lambda, Step Functions, SSR and Server Actions are outside this implementation.
 
