@@ -17,8 +17,8 @@ const fixture = {
   PLATFORM_COGNITO_DOMAIN_PREFIX: "wander-demo-example",
 };
 
-function synth() {
-  const config = parseConfig(fixture);
+function synth(extra: Record<string, string> = {}) {
+  const config = parseConfig({ ...fixture, ...extra });
   const app = new cdk.App();
   app.node.setContext(
     `availability-zones:account=${config.account}:region=${config.region}`,
@@ -139,7 +139,13 @@ describe("foundation deployment contract", () => {
     );
     expect(policyText).toContain("dynamodb:");
     expect(policyText).toContain("secretsmanager:");
-    expect(policyText).not.toContain('"Resource":"*"');
+    // ECR issues registry tokens only account-wide; every other grant names its resources.
+    const unscoped = Object.values(template.findResources("AWS::IAM::Policy"))
+      .flatMap((policy) => policy.Properties.PolicyDocument.Statement)
+      .filter((statement) => statement.Resource === "*");
+    expect(unscoped.map((statement) => statement.Action)).toEqual([
+      "ecr:GetAuthorizationToken",
+    ]);
   });
 
   it("publishes versioned references and never embeds secret values", () => {
@@ -155,5 +161,91 @@ describe("foundation deployment contract", () => {
       "SENTRY_AUTH_TOKEN",
     );
     expect(template.findResources("AWS::SecretsManager::Secret")).toEqual({});
+  });
+
+  it("trusts only the configured principal unless GitHub OIDC is selected", () => {
+    const trust = (extra: Record<string, string> = {}) =>
+      synth(extra).findResources("AWS::IAM::Role", {
+        Properties: {
+          AssumeRolePolicyDocument: {
+            Statement: Match.arrayWith([
+              Match.objectLike({
+                Principal: {
+                  AWS: "arn:aws:iam::111111111111:role/wander-deployer",
+                },
+              }),
+            ]),
+          },
+        },
+      });
+    const [plain] = Object.values(trust({ PLATFORM_GITHUB_REPOSITORY: "" }));
+    expect(plain?.Properties.AssumeRolePolicyDocument.Statement).toHaveLength(
+      1,
+    );
+    const [oidc] = Object.values(
+      trust({
+        PLATFORM_GITHUB_REPOSITORY: "example-owner/graph-rest-react-stack",
+      }),
+    );
+    expect(oidc?.Properties.AssumeRolePolicyDocument.Statement[1]).toEqual({
+      Effect: "Allow",
+      Action: "sts:AssumeRoleWithWebIdentity",
+      Principal: {
+        Federated:
+          "arn:aws:iam::111111111111:oidc-provider/token.actions.githubusercontent.com",
+      },
+      Condition: {
+        StringEquals: {
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+          "token.actions.githubusercontent.com:sub":
+            "repo:example-owner/graph-rest-react-stack:environment:demo",
+        },
+      },
+    });
+    for (const value of ["owner", "owner/repo/extra", "owner/repo:*"])
+      expect(() =>
+        parseConfig({ ...fixture, PLATFORM_GITHUB_REPOSITORY: value }),
+      ).toThrow("PLATFORM_GITHUB_REPOSITORY");
+  });
+
+  it("scopes the deployment role to bootstrap roles and publication targets", () => {
+    const template = synth();
+    const [policy] = Object.entries(
+      template.findResources("AWS::IAM::Policy"),
+    ).filter(([id]) => id.startsWith("DeploymentRole"));
+    const statements: { Action: string | string[]; Resource: unknown }[] =
+      policy?.[1].Properties.PolicyDocument.Statement ?? [];
+    const actions = statements.flatMap((statement) =>
+      [statement.Action].flat(),
+    );
+    expect(actions.some((action) => action.startsWith("iam:"))).toBe(false);
+    expect(actions).not.toContain("secretsmanager:GetSecretValue");
+    const resources = (action: string) =>
+      statements
+        .filter((statement) => [statement.Action].flat().includes(action))
+        .flatMap((statement) => [statement.Resource].flat());
+    expect(resources("sts:AssumeRole")).toEqual(
+      ["deploy", "file-publishing", "image-publishing", "lookup"].map(
+        (kind) =>
+          `arn:aws:iam::111111111111:role/cdk-hnb659fds-${kind}-role-111111111111-us-east-1`,
+      ),
+    );
+    expect(resources("ssm:GetParameter")).toEqual([
+      "arn:aws:ssm:us-east-1:111111111111:parameter/wander/demo/v1/*",
+      "arn:aws:ssm:us-east-1:111111111111:parameter/cdk-bootstrap/hnb659fds/version",
+    ]);
+    expect(resources("secretsmanager:DescribeSecret")).toEqual([
+      "arn:aws:secretsmanager:us-east-1:111111111111:secret:/wander/demo/v1/secrets/*",
+    ]);
+    expect(resources("cloudfront:CreateInvalidation")).toEqual([
+      "arn:aws:cloudfront::111111111111:distribution/*",
+    ]);
+    const repositories = Object.keys(
+      template.findResources("AWS::ECR::Repository"),
+    );
+    expect(resources("ecr:PutImage")).toEqual(
+      repositories.map((id) => ({ "Fn::GetAtt": [id, "Arn"] })),
+    );
+    expect(JSON.stringify(resources("s3:PutObject"))).toContain("UiBucket");
   });
 });

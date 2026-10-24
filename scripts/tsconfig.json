@@ -5,5 +5,10 @@
     "module": "ESNext",
     "moduleResolution": "Bundler"
   },
-  "include": ["deploy-plan.ts", "deployment-config.ts", "archive-static.ts"]
+  "include": [
+    "deploy-plan.ts",
+    "deployment-config.ts",
+    "archive-static.ts",
+    "preflight.ts"
+  ]
 }

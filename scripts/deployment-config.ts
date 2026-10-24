@@ -10,6 +10,10 @@ type Input = Record<string, string | undefined>;
  */
 export function resolveDeployment(input: Input, graphRevision: string) {
   const platform = platformConfig(input);
+  // The AWS CLI and SDKs honour these over --region in some paths; a mismatch deploys elsewhere.
+  for (const key of ["AWS_REGION", "AWS_DEFAULT_REGION"])
+    if (input[key] && input[key] !== platform.region)
+      throw new Error(`${key} must match PLATFORM_REGION`);
   uiConfig(input);
   const graphOrigin = input.DEPLOY_GRAPH_ORIGIN;
   let parsed: URL | null = null;

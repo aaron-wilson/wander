@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+/** CDK's default bootstrap qualifier; a custom `cdk bootstrap --qualifier` is not supported. */
+export const bootstrapQualifier = "hnb659fds";
+
 const schema = z.object({
   PLATFORM_ACCOUNT: z.string().regex(/^\d{12}$/),
   PLATFORM_REGION: z.string().regex(/^[a-z]{2}-[a-z]+-\d$/),
@@ -13,6 +16,12 @@ const schema = z.object({
     .string()
     .regex(/^arn:aws:iam::\d{12}:(role|user)\/[A-Za-z0-9+=,.@_\/-]+$/),
   PLATFORM_COGNITO_DOMAIN_PREFIX: z.string().regex(/^[a-z][a-z0-9-]{2,62}$/),
+  PLATFORM_GITHUB_REPOSITORY: z
+    .union([
+      z.literal(""),
+      z.string().regex(/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/),
+    ])
+    .optional(),
 });
 
 export interface PlatformConfig {
@@ -24,6 +33,8 @@ export interface PlatformConfig {
   certificateArn: string;
   deployPrincipalArn: string;
   cognitoDomainPrefix: string;
+  /** owner/name allowed to assume the deployment role through GitHub OIDC; unset disables it. */
+  githubRepository: string | undefined;
 }
 
 export function parseConfig(
@@ -78,6 +89,7 @@ export function parseConfig(
     certificateArn: values.PLATFORM_CERTIFICATE_ARN,
     deployPrincipalArn: values.PLATFORM_DEPLOY_PRINCIPAL_ARN,
     cognitoDomainPrefix: values.PLATFORM_COGNITO_DOMAIN_PREFIX,
+    githubRepository: values.PLATFORM_GITHUB_REPOSITORY || undefined,
   };
   return Object.freeze(config);
 }

@@ -28,12 +28,50 @@ const fixture = {
   API_LLM_PROVIDER: "mock",
   API_EVENTS_PROVIDER: "mock",
   OPENAI_API_KEY: "PRIVATE_DEPLOY_SENTINEL",
+  AWS_REGION: "",
+  AWS_DEFAULT_REGION: "",
 };
 const run = (args = ["demo"], extra = {}) =>
   spawnSync("bash", ["scripts/deploy-all.sh", ...args], {
     encoding: "utf8",
     env: { ...process.env, ...fixture, ...extra },
   });
+// Fake AWS and Docker CLIs that log every call and answer only read-only preflight queries.
+const withFakeCli = (check) => {
+  const bin = mkdtempSync(join(tmpdir(), "wander-cli-"));
+  const log = join(bin, "calls.log");
+  writeFileSync(log, "");
+  writeFileSync(
+    join(bin, "aws"),
+    `#!/bin/sh
+printf '%s\\n' "$*" >> "$FAKE_LOG"
+case "$1 $2" in
+  "--version "*) exit 0 ;;
+  "sts get-caller-identity")
+    printf '{"Account":"%s","Arn":"arn:aws:sts::%s:assumed-role/deployer/test"}\\n' "$FAKE_ACCOUNT" "$FAKE_ACCOUNT"
+    exit 0 ;;
+  "ssm get-parameter") [ "$FAKE_BOOTSTRAP" = missing ] && exit 254; echo 21; exit 0 ;;
+  "secretsmanager describe-secret") [ "$FAKE_SECRET" = missing ] && exit 254; echo found; exit 0 ;;
+esac
+exit 99
+`,
+    { mode: 0o755 },
+  );
+  writeFileSync(join(bin, "docker"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  try {
+    return check((args, extra = {}) => {
+      const result = run(args, {
+        PATH: `${bin}:${process.env.PATH}`,
+        FAKE_LOG: log,
+        FAKE_ACCOUNT: "111111111111",
+        ...extra,
+      });
+      return { ...result, calls: readFileSync(log, "utf8") };
+    });
+  } finally {
+    rmSync(bin, { recursive: true, force: true });
+  }
+};
 test("defaults to a safe ordered plan with pinned images and built public config", () => {
   const result = run();
   assert.equal(result.status, 0, result.stderr);
@@ -192,6 +230,69 @@ test("prints only selected secret names for the explicit provider path", () => {
     result.stdout + result.stderr,
     /PRIVATE_DEPLOY_SENTINEL|secrets\/anthropic/,
   );
+});
+test("dry run lists preflight queries without calling AWS", () =>
+  withFakeCli((fake) => {
+    const result = fake(["demo"], {
+      API_LLM_PROVIDER: "openai",
+      API_LLM_MODEL: "example-model",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.calls, "");
+    const order = [
+      "# configuration summary",
+      "aws sts get-caller-identity",
+      "/cdk-bootstrap/hnb659fds/version",
+      "describe-secret --secret-id /wander/demo/v1/secrets/openai",
+      "WanderdemoFoundation",
+    ].map((text) => result.stdout.indexOf(text));
+    assert.ok(
+      order.every((index, i) => index > (order[i - 1] ?? -1)),
+      order,
+    );
+  }));
+test("execution stops at preflight before any deployment or publication", () =>
+  withFakeCli((fake) => {
+    const selected = {
+      API_LLM_PROVIDER: "anthropic",
+      API_LLM_MODEL: "example-model",
+    };
+    for (const [extra, message] of [
+      [
+        { FAKE_ACCOUNT: "222222222222" },
+        /different account than PLATFORM_ACCOUNT/,
+      ],
+      [{ FAKE_BOOTSTRAP: "missing" }, /CDK bootstrap not found/],
+      [
+        { FAKE_SECRET: "missing" },
+        /secret \/wander\/demo\/v1\/secrets\/anthropic is missing/,
+      ],
+    ]) {
+      const result = fake(["demo", "--execute"], { ...selected, ...extra });
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, message);
+      assert.doesNotMatch(result.stdout, /cdk' '--app|docker' 'build/);
+      for (const call of result.calls.trim().split("\n"))
+        assert.match(
+          call,
+          /^(--version|sts get-caller-identity|ssm get-parameter --name \/cdk-bootstrap\/|secretsmanager describe-secret)/,
+        );
+      assert.doesNotMatch(
+        result.stdout + result.stderr + result.calls,
+        /get-secret-value|PRIVATE_DEPLOY_SENTINEL/,
+      );
+    }
+  }));
+test("rejects an AWS region that differs from PLATFORM_REGION", () => {
+  for (const key of ["AWS_REGION", "AWS_DEFAULT_REGION"]) {
+    const result = run(["demo"], { [key]: "eu-west-1" });
+    assert.notEqual(result.status, 0);
+    assert.match(
+      result.stderr,
+      new RegExp(`${key} must match PLATFORM_REGION`),
+    );
+    assert.equal(result.stdout, "");
+  }
 });
 
 test("archives changed public auth identity separately and preserves existing exports", () => {

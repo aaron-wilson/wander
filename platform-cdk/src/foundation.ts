@@ -13,6 +13,7 @@ import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as ssm from "aws-cdk-lib/aws-ssm";
 import { Construct } from "constructs";
 import type { PlatformConfig } from "./config.js";
+import { createDeploymentRole } from "./deployment-role.js";
 
 export class FoundationStack extends cdk.Stack {
   constructor(scope: Construct, id: string, config: PlatformConfig) {
@@ -180,8 +181,9 @@ export class FoundationStack extends cdk.Stack {
       assumedBy: assumeTasks,
       managedPolicies: [executionPolicy],
     });
-    const deployRole = new iam.Role(this, "DeploymentRole", {
-      assumedBy: new iam.ArnPrincipal(config.deployPrincipalArn),
+    const deployRole = createDeploymentRole(this, config, {
+      repositories: [restRepository, graphRepository],
+      uiBucket,
     });
     for (const name of ["openai", "anthropic", "ticketmaster"]) {
       secretsmanager.Secret.fromSecretNameV2(

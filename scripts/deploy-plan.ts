@@ -4,6 +4,7 @@ import { archiveStatic } from "./archive-static.js";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { deploymentSummary, resolveDeployment } from "./deployment-config.js";
+import { preflight } from "./preflight.js";
 
 const print = (line: string) => process.stdout.write(line + "\n");
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -32,6 +33,21 @@ const revisions = {
 };
 const deployment = resolveDeployment(input, revisions.graph);
 const { platform, graphOrigin } = deployment;
+const prefix = `/wander/${target}/v1`;
+print(
+  `# ${execute ? "EXECUTE" : "DRY RUN"}: ${target}; foundation, REST, graph, static UI; no secret values printed`,
+);
+print(
+  `# immutable revisions REST=${revisions.rest} graph=${revisions.graph} UI=${revisions.ui}`,
+);
+for (const line of deploymentSummary(deployment)) print(`# ${line}`);
+// Before the checkout checks too, so a wrong account fails first whatever the working tree holds.
+preflight(
+  platform,
+  deployment.secrets.map((vendor) => `${prefix}/secrets/${vendor}`),
+  execute,
+  print,
+);
 for (const dir of Object.values(repos))
   if (git(dir, ["status", "--porcelain"]))
     throw new Error(
@@ -63,7 +79,6 @@ const run = (
       });
   }
 };
-const prefix = `/wander/${target}/v1`;
 const parameter = (key: string) => {
   const name = `${prefix}/${key}`;
   const args = [
@@ -85,17 +100,7 @@ const parameter = (key: string) => {
   return execFileSync("aws", args, { encoding: "utf8" }).trim();
 };
 const deploymentDir = resolve(root, ".deployment", target);
-if (execute) {
-  for (const [command, args] of [
-    ["aws", ["--version"]],
-    ["docker", ["info"]],
-  ] as const) {
-    const result = spawnSync(command, [...args], { stdio: "ignore" });
-    if (result.error || result.status !== 0)
-      throw new Error(`Required deployment tool unavailable: ${command}`);
-  }
-  mkdirSync(deploymentDir, { recursive: true });
-}
+if (execute) mkdirSync(deploymentDir, { recursive: true });
 const cli = resolve(root, "platform-cdk/node_modules/.bin/cdk");
 const loader = resolve(root, "platform-cdk/node_modules/tsx/dist/loader.mjs");
 const deploy = (
@@ -125,33 +130,12 @@ const deploy = (
       ...extra,
     },
   );
-print(
-  `# ${execute ? "EXECUTE" : "DRY RUN"}: ${target}; foundation, REST, graph, static UI; no secret values printed`,
-);
-print(
-  `# immutable revisions REST=${revisions.rest} graph=${revisions.graph} UI=${revisions.ui}`,
-);
-for (const line of deploymentSummary(deployment)) print(`# ${line}`);
 deploy(
   resolve(root, "platform-cdk"),
   `Wander${target}Foundation`,
   "tsconfig.json",
   "src/app.ts",
 );
-for (const vendor of deployment.secrets) {
-  run(root, "aws", [
-    "secretsmanager",
-    "describe-secret",
-    "--region",
-    platform.region,
-    "--secret-id",
-    `${prefix}/secrets/${vendor}`,
-    "--query",
-    "ARN",
-    "--output",
-    "text",
-  ]);
-}
 const registry = `${platform.account}.dkr.ecr.${platform.region}.amazonaws.com`;
 print(
   `aws ecr get-login-password --region ${quote(platform.region)} | docker login --username AWS --password-stdin ${quote(registry)}`,
